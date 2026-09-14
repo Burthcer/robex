@@ -1,16 +1,29 @@
 """Windows window manager for detecting, focusing, and mapping Roblox coordinates."""
 
+import time
 import logging
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 try:
     import win32gui
     import win32con
+    import win32process
+    import win32api
     HAS_WIN32 = True
 except ImportError:
     HAS_WIN32 = False
+
+
+@dataclass
+class WindowInfo:
+    """Describes a single top-level window discovered during enumeration."""
+    hwnd: int
+    title: str
+    rect: Tuple[int, int, int, int]  # (left, top, width, height)
+    is_visible: bool
 
 
 class WindowManager:
@@ -44,6 +57,49 @@ class WindowManager:
 
         return found_hwnd
 
+    def list_open_windows(self, filter_empty: bool = True) -> List[WindowInfo]:
+        """Enumerates every top-level window currently open on the desktop.
+
+        This supports targeting any Roblox/Windows app dynamically instead of a
+        single hardcoded title -- callers can inspect the returned titles/rects
+        to pick a target window interactively.
+
+        Args:
+            filter_empty: When True (default), skips windows with a blank title
+                (background/helper windows with no user-facing surface).
+        """
+        if not HAS_WIN32:
+            logger.warning("pywin32 not available; cannot enumerate windows.")
+            return []
+
+        windows: List[WindowInfo] = []
+
+        def enum_windows_callback(hwnd, extra):
+            title = win32gui.GetWindowText(hwnd)
+            if filter_empty and not title.strip():
+                return True
+
+            try:
+                left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+                rect = (left, top, right - left, bottom - top)
+            except Exception:
+                rect = (0, 0, 0, 0)
+
+            windows.append(WindowInfo(
+                hwnd=hwnd,
+                title=title,
+                rect=rect,
+                is_visible=win32gui.IsWindowVisible(hwnd),
+            ))
+            return True
+
+        try:
+            win32gui.EnumWindows(enum_windows_callback, None)
+        except Exception as e:
+            logger.error("Failed to enumerate windows: %s", e)
+
+        return windows
+
     def get_window_rect(self, hwnd: Optional[int] = None) -> Optional[Tuple[int, int, int, int]]:
         """Returns (left, top, width, height) of the target window."""
         if not HAS_WIN32:
@@ -63,7 +119,15 @@ class WindowManager:
             return None
 
     def focus_window(self, hwnd: Optional[int] = None) -> bool:
-        """Brings the game window to the foreground."""
+        """Brings the game window to the foreground.
+
+        Windows silently denies SetForegroundWindow calls made by a background
+        process, so this attaches our thread's input queue to the target
+        window's owning thread first (the standard AttachThreadInput trick) to
+        make the foreground switch reliable, then falls back to
+        BringWindowToTop / ShowWindow(SW_RESTORE) for minimized or stubborn
+        windows.
+        """
         if not HAS_WIN32:
             return False
 
@@ -73,12 +137,73 @@ class WindowManager:
             return False
 
         try:
+            if win32gui.IsIconic(target_hwnd):
+                win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
+
+            current_thread_id = win32api.GetCurrentThreadId()
+            target_thread_id, _ = win32process.GetWindowThreadProcessId(target_hwnd)
+
+            attached = False
+            if target_thread_id and target_thread_id != current_thread_id:
+                try:
+                    win32process.AttachThreadInput(current_thread_id, target_thread_id, True)
+                    attached = True
+                except Exception as e:
+                    logger.debug("AttachThreadInput failed, continuing without it: %s", e)
+
+            try:
+                win32gui.BringWindowToTop(target_hwnd)
+                win32gui.SetForegroundWindow(target_hwnd)
+            finally:
+                if attached:
+                    try:
+                        win32process.AttachThreadInput(current_thread_id, target_thread_id, False)
+                    except Exception as e:
+                        logger.debug("Failed to detach thread input: %s", e)
+
+            # Final fallback restore in case foreground activation was silently
+            # denied (e.g. target running under a different session/elevation).
             win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
-            win32gui.SetForegroundWindow(target_hwnd)
             return True
         except Exception as e:
             logger.error("Failed to focus window: %s", e)
             return False
+
+    def is_target_focused(self) -> bool:
+        """Returns True if the target window currently holds OS input focus."""
+        if not HAS_WIN32:
+            return False
+
+        target_hwnd = self.find_target_window()
+        if not target_hwnd:
+            return False
+
+        try:
+            return win32gui.GetForegroundWindow() == target_hwnd
+        except Exception as e:
+            logger.error("Failed to check window focus: %s", e)
+            return False
+
+    def ensure_target_focused(self, timeout_sec: float = 1.0) -> bool:
+        """Verifies the target window has focus, (re)focusing it if necessary.
+
+        Used as a pre-execution guard so mouse/keyboard events dispatched by
+        the macro runner land on the intended game/app rather than whatever
+        window the user last clicked on.
+        """
+        if self.is_target_focused():
+            return True
+
+        if not self.focus_window():
+            return False
+
+        deadline = time.time() + timeout_sec
+        while time.time() < deadline:
+            if self.is_target_focused():
+                return True
+            time.sleep(0.05)
+
+        return self.is_target_focused()
 
     def window_to_screen_coords(self, rel_x: float, rel_y: float) -> Optional[Tuple[int, int]]:
         """Converts normalized (0.0 - 1.0) or relative window offsets to absolute screen pixels."""

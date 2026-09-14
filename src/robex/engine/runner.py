@@ -6,6 +6,7 @@ from enum import Enum
 from typing import List, Callable, Optional
 
 from robex.core.safety import global_safety, EmergencyStopTriggered
+from robex.core.window import window_manager
 from robex.engine.actions import Action
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,17 @@ class MacroRunner:
         self._repeat_count: int = 1  # 0 for infinite loop
         self._state_callbacks: List[Callable[[RunnerState, str], None]] = []
         self._lock = threading.Lock()
+        self._require_focus: bool = False  # Optional pre-execution focus guard
+
+    def set_require_focus(self, enabled: bool) -> None:
+        """Enables/disables the optional pre-execution target-window focus guard.
+
+        When enabled, the runner calls `window_manager.ensure_target_focused()`
+        before each loop iteration so actions land on the intended game/app
+        instead of whatever window the user last clicked on. Off by default to
+        preserve existing behavior (and to stay inert on non-Windows/test envs).
+        """
+        self._require_focus = enabled
 
     @property
     def state(self) -> RunnerState:
@@ -105,6 +117,13 @@ class MacroRunner:
 
                 loop_iteration += 1
                 logger.debug("Starting macro loop iteration %d", loop_iteration)
+
+                # Optional pre-execution guard: refocus the target window before
+                # dispatching this iteration's actions. Best-effort -- a failed
+                # refocus is logged but does not abort the macro, since the
+                # killswitch/pause checks above already guard user safety.
+                if self._require_focus and not window_manager.ensure_target_focused():
+                    logger.warning("Could not confirm target window focus before iteration %d", loop_iteration)
 
                 for idx, action in enumerate(self._actions):
                     global_safety.assert_safe()
