@@ -1,9 +1,11 @@
 """Visual object and button detection using OpenCV color masking and template matching."""
 
 from dataclasses import dataclass
-from typing import List, Tuple, Dict
+from typing import List, Optional, Tuple, Dict
 import logging
 import numpy as np
+
+from robex.vision.ocr import OcrEngine, ocr_engine
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +146,134 @@ class VisionDetector:
 
         return results
 
+    def detect_ui_elements(
+        self,
+        frame: np.ndarray,
+        min_area: int = 200,
+        max_area: int = 300000,
+        min_aspect: float = 0.2,
+        max_aspect: float = 6.0,
+        min_rectangularity: float = 0.6,
+    ) -> List["DetectionResult"]:
+        """Discovers clickable-looking UI elements (buttons, cards) with no predefined
+        color or template.
+
+        Uses Canny edge detection followed by morphological closing to bridge small
+        gaps in button borders into solid contours, then filters those contours by
+        area, aspect ratio, and rectangularity (how much of its own bounding box the
+        contour actually fills) so only shapes that look like real UI controls --
+        rather than arbitrary background noise -- are kept.
+        """
+        if not HAS_CV2 or frame is None:
+            return []
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+        closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        results: List[DetectionResult] = []
+
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if not (min_area <= area <= max_area):
+                continue
+
+            bx, by, bw, bh = cv2.boundingRect(cnt)
+            if bw == 0 or bh == 0:
+                continue
+
+            aspect_ratio = bw / bh
+            if not (min_aspect <= aspect_ratio <= max_aspect):
+                continue
+
+            rectangularity = area / (bw * bh + 1e-5)
+            if rectangularity < min_rectangularity:
+                continue
+
+            results.append(DetectionResult(
+                x=bx + bw // 2,
+                y=by + bh // 2,
+                width=bw,
+                height=bh,
+                confidence=min(1.0, rectangularity),
+                label="ui_element",
+            ))
+
+        results.sort(key=lambda r: r.width * r.height, reverse=True)
+        return results
+
+
+class AutoPicker:
+    """Finds the on-screen UI element that best matches a free-form semantic query.
+
+    Scores candidates -- color-matched buttons plus generic edge-detected UI
+    elements -- against color names, positional cues ('top'/'bottom'/'left'/
+    'right'/'center'), and OCR text labels present in the query string, and
+    returns the highest scoring match. This lets callers ask for things like
+    "the button in the top right" or "Play" instead of only a bare color name.
+    """
+
+    def __init__(self, vision_detector: VisionDetector, ocr: Optional[OcrEngine] = None):
+        self._detector = vision_detector
+        self._ocr = ocr
+
+    def find_element(self, frame: np.ndarray, query: str) -> Optional[DetectionResult]:
+        """Returns the best-scoring detected element for `query`, or None if nothing
+        scores above the baseline (no matching color/position/text signal at all)."""
+        if not HAS_CV2 or frame is None or not query:
+            return None
+
+        q = query.lower()
+        fh, fw = frame.shape[:2]
+
+        # Color-matched buttons are a strong, unambiguous signal so they start with a
+        # higher baseline score; generic edge-detected shapes are the fallback pool
+        # for purely positional or text-only queries.
+        candidates: List[Tuple[DetectionResult, float]] = []
+        for color in COLOR_HSV_RANGES:
+            if color in q:
+                candidates += [(r, 0.6) for r in self._detector.find_buttons_by_color(frame, color)]
+        candidates += [(r, 0.2) for r in self._detector.detect_ui_elements(frame)]
+
+        if not candidates:
+            return None
+
+        ocr_hits = self._ocr.read_text(frame) if self._ocr and self._ocr.is_available else []
+
+        best_result: Optional[DetectionResult] = None
+        best_score = 0.0
+
+        for result, score in candidates:
+            if "top" in q:
+                score += 0.3 if result.y < fh * 0.4 else -0.2
+            if "bottom" in q:
+                score += 0.3 if result.y > fh * 0.6 else -0.2
+            if "left" in q:
+                score += 0.3 if result.x < fw * 0.4 else -0.2
+            if "right" in q:
+                score += 0.3 if result.x > fw * 0.6 else -0.2
+            if "center" in q or "middle" in q:
+                centered = fw * 0.35 <= result.x <= fw * 0.65 and fh * 0.35 <= result.y <= fh * 0.65
+                score += 0.3 if centered else -0.2
+
+            for hit in ocr_hits:
+                if hit.text and hit.text.lower() in q:
+                    bx, by, bw, bh = result.bbox
+                    if bx <= hit.x <= bx + bw and by <= hit.y <= by + bh:
+                        score += 0.5
+
+            if score > best_score:
+                best_score = score
+                best_result = result
+
+        return best_result
+
 
 # Global vision detector instance
 detector = VisionDetector()
+
+# Global auto-picker instance, wired to the shared detector and OCR engine
+auto_picker = AutoPicker(detector, ocr_engine)

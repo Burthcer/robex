@@ -1,14 +1,14 @@
 """Atomic macro action primitives and serializable action descriptors."""
 
 from dataclasses import dataclass, asdict
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import time
 import logging
 
 from robex.core.safety import global_safety
 from robex.core.input_driver import driver
 from robex.vision.screen import screen_grabber
-from robex.vision.detector import detector
+from robex.vision.detector import detector, auto_picker
 
 logger = logging.getLogger(__name__)
 
@@ -43,31 +43,43 @@ class ClickAction(Action):
 
 @dataclass
 class VisionClickAction(Action):
-    """Finds a target on screen (e.g. green button) and clicks its center."""
+    """Finds a target on screen (e.g. green button) and clicks its center.
+
+    Accepts either a plain `target_color` (fast HSV color-matching path, the
+    original behavior) or a free-form semantic `query` (e.g. "button in the
+    top right", "Play") which is routed through `AutoPicker` to score
+    detected elements by color, position, and OCR text instead of just color.
+    """
     target_color: str = "green"
+    query: Optional[str] = None
     button: str = "left"
     timeout_sec: float = 3.0
     action_type: str = "vision_click"
 
     def execute(self) -> None:
         global_safety.assert_safe()
-        logger.debug("Executing vision click for target: %s", self.target_color)
+        target_desc = self.query or self.target_color
+        logger.debug("Executing vision click for target: %s", target_desc)
 
         start_time = time.time()
         while time.time() - start_time < self.timeout_sec:
             global_safety.assert_safe()
             frame = screen_grabber.grab_screen()
             if frame is not None:
-                matches = detector.find_buttons_by_color(frame, self.target_color)
-                if matches:
-                    best = matches[0]
-                    logger.info("Found %s button at (%d, %d) with confidence %.2f",
-                                self.target_color, best.x, best.y, best.confidence)
+                if self.query:
+                    best = auto_picker.find_element(frame, self.query)
+                else:
+                    matches = detector.find_buttons_by_color(frame, self.target_color)
+                    best = matches[0] if matches else None
+
+                if best:
+                    logger.info("Found target '%s' at (%d, %d) with confidence %.2f",
+                                target_desc, best.x, best.y, best.confidence)
                     driver.click(x=best.x, y=best.y, button=self.button)
                     return
             time.sleep(0.1)
 
-        logger.warning("Vision click timed out: %s button not found on screen.", self.target_color)
+        logger.warning("Vision click timed out: target '%s' not found on screen.", target_desc)
 
 
 @dataclass
@@ -134,6 +146,7 @@ def action_from_dict(data: Dict[str, Any]) -> Action:
     elif atype == "vision_click":
         return VisionClickAction(
             target_color=data.get("target_color", data.get("color", "green")),
+            query=data.get("query"),
             button=data.get("button", "left"),
             timeout_sec=float(data.get("timeout_sec", 3.0))
         )
