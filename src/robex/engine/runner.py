@@ -1,6 +1,7 @@
 """Threaded macro execution runner with state management and killswitch integration."""
 
 import threading
+import time
 import logging
 from enum import Enum
 from typing import List, Callable, Optional
@@ -8,6 +9,7 @@ from typing import List, Callable, Optional
 from robex.core.safety import global_safety, EmergencyStopTriggered
 from robex.core.window import window_manager
 from robex.engine.actions import Action
+from robex.engine.history import history_recorder
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +21,16 @@ class RunnerState(str, Enum):
     STOPPED = "STOPPED"
 
 
+class _DurationBudgetExceeded(Exception):
+    """Internal signal raised when `max_duration_sec` elapses. Not an error -- the
+    worker loop treats this as a graceful, intentional stop."""
+    pass
+
+
 class MacroRunner:
     """Coordinates background execution of an action list with pause/resume and emergency stop."""
 
-    def __init__(self):
+    def __init__(self, max_duration_sec: Optional[float] = None, action_delay_sec: float = 0.0):
         self._actions: List[Action] = []
         self._state = RunnerState.IDLE
         self._thread: Optional[threading.Thread] = None
@@ -32,6 +40,8 @@ class MacroRunner:
         self._state_callbacks: List[Callable[[RunnerState, str], None]] = []
         self._lock = threading.Lock()
         self._require_focus: bool = False  # Optional pre-execution focus guard
+        self._max_duration_sec = max_duration_sec  # None = unlimited (prior behavior)
+        self._action_delay_sec = action_delay_sec  # Optional pacing delay between actions
 
     def set_require_focus(self, enabled: bool) -> None:
         """Enables/disables the optional pre-execution target-window focus guard.
@@ -42,6 +52,14 @@ class MacroRunner:
         preserve existing behavior (and to stay inert on non-Windows/test envs).
         """
         self._require_focus = enabled
+
+    def set_max_duration(self, seconds: Optional[float]) -> None:
+        """Sets/clears the runtime duration budget. `None` means unlimited (default)."""
+        self._max_duration_sec = seconds
+
+    def set_action_delay(self, seconds: float) -> None:
+        """Sets the pacing delay (seconds) inserted after each atomic action."""
+        self._action_delay_sec = seconds
 
     @property
     def state(self) -> RunnerState:
@@ -105,6 +123,7 @@ class MacroRunner:
         """Background worker thread executing action sequence."""
         self._set_state(RunnerState.RUNNING, f"Executing {len(self._actions)} actions")
         loop_iteration = 0
+        run_start_time = time.time()
 
         try:
             while True:
@@ -130,8 +149,36 @@ class MacroRunner:
                     self._pause_event.wait()
                     global_safety.assert_safe()
 
-                    # Execute atomic action
-                    action.execute()
+                    # Runtime duration budget: halt gracefully before starting the
+                    # next atomic action once the allotted time ceiling is reached.
+                    if self._max_duration_sec is not None and (time.time() - run_start_time) >= self._max_duration_sec:
+                        raise _DurationBudgetExceeded(
+                            f"Max duration of {self._max_duration_sec}s reached"
+                        )
+
+                    # Execute atomic action, benchmarking duration for telemetry.
+                    action_started = time.time()
+                    try:
+                        action.execute()
+                    except Exception as e:
+                        history_recorder.record(
+                            action_type=getattr(action, "action_type", type(action).__name__),
+                            details=str(action),
+                            duration_ms=(time.time() - action_started) * 1000.0,
+                            status="error",
+                            error_msg=str(e),
+                        )
+                        raise
+                    else:
+                        history_recorder.record(
+                            action_type=getattr(action, "action_type", type(action).__name__),
+                            details=str(action),
+                            duration_ms=(time.time() - action_started) * 1000.0,
+                            status="success",
+                        )
+
+                    if self._action_delay_sec > 0:
+                        time.sleep(self._action_delay_sec)
 
                 # Check repeat condition
                 if self._repeat_count > 0 and loop_iteration >= self._repeat_count:
@@ -139,6 +186,9 @@ class MacroRunner:
 
             self._set_state(RunnerState.IDLE, "Macro completed successfully")
 
+        except _DurationBudgetExceeded as e:
+            logger.info("Worker loop halted by duration budget: %s", e)
+            self._set_state(RunnerState.IDLE, str(e))
         except EmergencyStopTriggered as e:
             logger.warning("Worker loop stopped by killswitch: %s", e)
             self._set_state(RunnerState.STOPPED, "Emergency Killswitch Activated")
