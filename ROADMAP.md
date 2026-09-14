@@ -13,12 +13,12 @@ This roadmap breaks down the development of Robex's advanced natural language in
 
 ## Sequential Task Breakdown
 
-### [Task 1] Intelligent Multiline Input, Spell Correction & Command Normalization
-- **Goal**: Support pasting large paragraphs or raw speech-to-text transcriptions with automatic spelling/typo correction, filler-word removal, and intent normalization before passing to the action parser.
+### [Task 1] Intelligent Multiline Input, Spell Correction & Command Normalization [COMPLETED]
+- **Status**: Completed & Verified (All 27 unit tests passing, zero VRAM / <50MB RAM).
 - **Deliverables**:
   - `src/robex/ai/normalizer.py`: Fuzzy matching and spell correction for game commands using `difflib`.
-  - Integration into `src/robex/ai/commander.py` to handle multiline inputs and speech filler words.
-  - Unit test suite in `tests/test_normalizer.py`.
+  - Integration into `src/robex/ai/commander.py` to handle multiline inputs, dictation filler words, and sentence stops.
+  - Unit test suite in `tests/test_normalizer.py` and extended `tests/test_commander.py`.
 
 ---
 

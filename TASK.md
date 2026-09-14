@@ -1,27 +1,27 @@
-# Task 1: Intelligent Multiline Input, Spell Correction & Command Normalization
+# Task 2: Universal Multi-App Target & Window Focus Engine
 
 ## Objective
-Build a lightweight, typo-tolerant natural language command normalizer supporting multiline speech-to-text dictation and pasted paragraphs while keeping RAM usage negligible (<50 MB) and zero VRAM footprint.
+Build a universal multi-application window manager and focus guard supporting dynamic window discovery, robust foreground restoration, client-relative coordinate mapping, and pre-execution focus validation.
 
 ## Target Files
-- `src/robex/ai/normalizer.py` [NEW]
-- `src/robex/ai/__init__.py` [MODIFY]
-- `src/robex/ai/commander.py` [MODIFY]
-- `tests/test_normalizer.py` [NEW]
-- `tests/test_commander.py` [MODIFY]
+- `src/robex/core/window.py` [MODIFY]
+- `src/robex/core/__init__.py` [MODIFY]
+- `src/robex/engine/runner.py` [MODIFY]
+- `tests/test_window.py` [NEW]
 
 ## Actionable Checklist
-1. Create `src/robex/ai/normalizer.py` implementing `TextNormalizer` with algorithmic fuzzy matching (using Python's standard library `difflib.get_close_matches`), spelling correction for game/macro keywords (verbs: `click`, `press`, `hold`, `wait`, `jump`; colors: `green`, `red`, `blue`, `yellow`, `orange`; keys: `space`, `shift`, `w`, `a`, `s`, `d`), and synonym mapping (`tap` -> `press`, `walk` -> `hold w`).
-2. Implement speech-to-text cleaning routines in `TextNormalizer` that strip conversational filler phrases (`"please"`, `"could you"`, `"um"`, `"uh"`, `"hey"`, `"now"`) and segment multiline paragraphs into standardized sequential action clauses.
-3. Integrate `TextNormalizer` into `CommandParser` in `src/robex/ai/commander.py` so incoming raw or dictated text is automatically cleaned and spell-corrected before action tokenization.
-4. Create comprehensive unit tests in `tests/test_normalizer.py` and extend `tests/test_commander.py` verifying typo correction (e.g. `"clck gern botton"` -> `"click green button"`), speech filler removal, multiline paragraph parsing, and zero regression.
+1. Extend `WindowManager` in `src/robex/core/window.py` with a `WindowInfo` dataclass (hwnd, title, rect, is_visible) and implement `list_open_windows(filter_empty: bool = True) -> List[WindowInfo]` to enumerate and discover any running game or desktop application.
+2. Implement robust foreground restoration in `focus_window(hwnd)` using `AttachThreadInput` / `BringWindowToTop` / `ShowWindow(SW_RESTORE)` fallback routines to ensure off-screen and background windows reliably regain input focus across Windows versions.
+3. Add `is_target_focused() -> bool` and `ensure_target_focused(timeout_sec: float = 1.0) -> bool` to verify active window focus before mouse/keyboard events are dispatched.
+4. Integrate target focus validation into `src/robex/engine/runner.py` as an optional pre-execution guard that automatically refocuses the target game/app before running action iterations.
+5. Create `tests/test_window.py` with mock Win32 APIs testing window enumeration, coordinate transformation, focus validation, and runner integration under non-Windows and mock environments.
 
 ## Constraints
-- **Strict Resource Budget**: Do NOT import heavy transformer libraries (e.g., PyTorch, HuggingFace, spaCy); use only standard library modules (`difflib`, `re`) so execution remains well within the 4 GB RAM ceiling and uses 0 GB VRAM.
-- **Documentation Integrity**: Never delete existing comments, docstrings, or structure in `src/robex/ai/commander.py` and related files.
-- **Backward Compatibility**: All existing 17 unit tests in the test suite must continue to pass without error.
+- **Strict Resource Budget**: Must use only the Python standard library and `pywin32` with zero additional heavy dependencies, maintaining 0 MB VRAM and <5 MB RAM overhead.
+- **Documentation Integrity**: Preserve all existing comments, docstrings, and architectural structure in `src/robex/core/window.py` and `src/robex/engine/runner.py`.
+- **Backward Compatibility**: Maintain the default target title as `"Roblox"` and preserve existing public methods (`find_target_window`, `get_window_rect`, `focus_window`, `window_to_screen_coords`) so existing code remains fully compatible. All 27 existing tests must continue to pass without regression.
 
 ## Verification Command
 ```powershell
-.\venv\Scripts\pytest tests/ -v
+.\venv\Scripts\pytest tests/test_window.py tests/ -v
 ```
