@@ -31,12 +31,13 @@ This roadmap breaks down the development of Robex's advanced natural language in
 
 ---
 
-### [Task 3] Smart Auto-Picker & Semantic Screen Perception
-- **Goal**: Implement an intelligent screen element "auto-picker" that discovers clickable buttons, icons, and text automatically across the active window without requiring manual template cropping.
+### [Task 3] Smart Auto-Picker & Semantic Screen Perception [COMPLETED]
+- **Status**: Completed & Verified (All 53 unit tests passing, zero VRAM / <50MB RAM).
 - **Deliverables**:
-  - Expanded `src/robex/vision/detector.py` with multi-color contour grouping, UI bounding-box clustering, and OCR text recognition.
-  - Heuristic auto-picker matching natural language queries (e.g. "Claim button", "Shop icon", "Green play button").
-  - Memory-efficient frame processing strictly bounded under 200 MB RAM.
+  - `src/robex/vision/ocr.py`: Pluggable `OcrEngine` supporting Tesseract / WinOCR / EasyOCR with graceful degradation.
+  - `src/robex/vision/detector.py`: `detect_ui_elements` contour shape detector and `AutoPicker` scoring element candidates by color, positional cues ("top", "bottom", "center"), and OCR text.
+  - `src/robex/engine/actions.py`: `VisionClickAction` upgraded to route semantic queries through `AutoPicker`.
+  - Unit test suite in `tests/test_auto_picker.py` and extended `tests/test_detector.py`.
 
 ---
 

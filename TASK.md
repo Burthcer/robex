@@ -1,29 +1,28 @@
-# Task 3: Smart Auto-Picker & Semantic Screen Perception
+# Task 4: Execution Telemetry, Action History & Runtime Constraints
 
 ## Objective
-Build an intelligent screen auto-picker and UI element detector that automatically locates clickable buttons, icons, and UI components from active game screens using contour geometry and color heuristics without requiring manual image crops, operating under 100 MB RAM and 0 GB VRAM.
+Build a thread-safe execution history recorder with JSON export and integrate runtime duration budgets into the macro runner, operating strictly within 5 MB RAM and 0 GB VRAM.
 
 ## Target Files
-- `src/robex/vision/detector.py` [MODIFY]
-- `src/robex/vision/ocr.py` [NEW]
-- `src/robex/vision/__init__.py` [MODIFY]
-- `src/robex/engine/actions.py` [MODIFY]
-- `tests/test_detector.py` [MODIFY]
-- `tests/test_auto_picker.py` [NEW]
+- `src/robex/engine/history.py` [NEW]
+- `src/robex/engine/runner.py` [MODIFY]
+- `src/robex/engine/__init__.py` [MODIFY]
+- `tests/test_history.py` [NEW]
+- `tests/test_runner.py` [MODIFY]
 
 ## Actionable Checklist
-1. Create `src/robex/vision/ocr.py` defining an extensible `OcrEngine` interface with Windows native OCR / Tesseract / EasyOCR hooks and a graceful fallback returning bounding boxes with text confidence.
-2. Implement `detect_ui_elements(frame) -> List[DetectionResult]` in `src/robex/vision/detector.py` using OpenCV Canny edge detection, morphological closing, and contour filtering (area, aspect ratio, rectangularity) to automatically discover clickable UI buttons and card elements without predefined templates.
-3. Implement `AutoPicker` in `src/robex/vision/detector.py` with `find_element(frame, query: str) -> Optional[DetectionResult]` that scores detected elements against color names, positional cues (e.g. "top", "bottom", "center"), and text labels.
-4. Update `VisionClickAction` in `src/robex/engine/actions.py` to support semantic `query` strings routed through `AutoPicker` in addition to pure color names.
-5. Add unit tests in `tests/test_auto_picker.py` and extend `tests/test_detector.py` using synthetic game UI frames (buttons with borders, colors, and varied aspect ratios) to verify auto-detection, query matching, and fallback handling.
+1. Create `src/robex/engine/history.py` implementing an `ActionRecord` dataclass (action_type, details, timestamp, duration_ms, status, error_msg) and a thread-safe `HistoryRecorder` maintaining a fixed-size ring buffer (maximum 1,000 entries) to prevent unbounded memory growth.
+2. Implement summary metrics (`get_summary() -> HistorySummary`) and structured JSON serialization (`export_to_json(filepath)`) in `HistoryRecorder` so users can inspect past execution logs and durations.
+3. Extend `MacroRunner` in `src/robex/engine/runner.py` with runtime budget controls (`max_duration_sec: Optional[float]` and `action_delay_sec: float = 0.0`) that automatically halt execution gracefully when the allotted time ceiling expires.
+4. Update `_worker_loop` in `src/robex/engine/runner.py` to benchmark each action's execution duration, append structured telemetry records to `history_recorder`, and enforce `max_duration_sec` checks before each atomic step.
+5. Author comprehensive unit tests in `tests/test_history.py` and expand `tests/test_runner.py` verifying accurate duration tracking, thread safety, JSON export, ring-buffer bounding, and max-duration enforcement.
 
 ## Constraints
-- **Strict Memory Ceiling**: Do NOT load neural network weights requiring more than 200 MB RAM; ensure 0 GB VRAM usage for the default heuristic and OpenCV vision pipeline to remain far below the 4 GB threshold.
-- **Documentation Integrity**: Preserve all existing comments and docstrings in `detector.py`, `actions.py`, and `screen.py`.
-- **Backward Compatibility**: Existing methods (`find_buttons_by_color`, `find_template`) and `COLOR_HSV_RANGES` must remain intact; all 44 existing unit tests must continue to pass without error.
+- **Strict Resource Budget**: History storage must be capped at 1,000 items in memory; total RAM overhead must remain below 5 MB with 0 GB VRAM consumption to adhere strictly to the 4 GB ceilings.
+- **Documentation Integrity**: Preserve all existing comments, docstrings, and architectural structure in `src/robex/engine/runner.py`.
+- **Backward Compatibility**: When `max_duration_sec` is `None`, runner must behave identically to previous iterations; all 53 existing unit tests must continue to pass without error.
 
 ## Verification Command
 ```powershell
-.\venv\Scripts\pytest tests/test_auto_picker.py tests/test_detector.py tests/ -v
+.\venv\Scripts\pytest tests/test_history.py tests/test_runner.py tests/ -v
 ```
