@@ -41,12 +41,12 @@ This roadmap breaks down the development of Robex's advanced natural language in
 
 ---
 
-### [Task 4] Execution Telemetry, Action History & Runtime Constraints
-- **Goal**: Provide a detailed historical audit log of every action executed, timestamps, execution durations, and customizable runtime budget controls (max execution duration, loop caps, rate limits).
+### [Task 4] Execution Telemetry, Action History & Runtime Constraints [COMPLETED]
+- **Status**: Completed & Verified (All 68 unit tests passing, zero VRAM / <5MB RAM).
 - **Deliverables**:
-  - `src/robex/engine/history.py`: Structured execution history recorder with JSON export capability.
-  - Runtime limits and timeouts inside `src/robex/engine/runner.py`.
-  - Unit tests in `tests/test_history.py`.
+  - `src/robex/engine/history.py`: Thread-safe `HistoryRecorder` maintaining a fixed-size ring buffer (1,000 entries), aggregate metrics, and JSON export.
+  - `src/robex/engine/runner.py`: Benchmarking per-action execution duration, enforcing `max_duration_sec` runtime budgets, and applying pacing delays.
+  - Unit test suite in `tests/test_history.py` and extended `tests/test_runner.py`.
 
 ---
 

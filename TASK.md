@@ -1,28 +1,28 @@
-# Task 4: Execution Telemetry, Action History & Runtime Constraints
+# Task 5: UI Overhaul: Multiline Prompting, History Inspector & Settings
 
 ## Objective
-Build a thread-safe execution history recorder with JSON export and integrate runtime duration budgets into the macro runner, operating strictly within 5 MB RAM and 0 GB VRAM.
+Overhaul the CustomTkinter GUI with a multiline text area for dictated/pasted paragraphs, a target application window selector, a live execution history inspector, runtime duration controls, and a real-time RAM/VRAM resource monitor.
 
 ## Target Files
-- `src/robex/engine/history.py` [NEW]
-- `src/robex/engine/runner.py` [MODIFY]
-- `src/robex/engine/__init__.py` [MODIFY]
-- `tests/test_history.py` [NEW]
-- `tests/test_runner.py` [MODIFY]
+- `src/robex/gui/main_window.py` [MODIFY]
+- `src/robex/gui/__init__.py` [MODIFY]
+- `tests/test_gui.py` [NEW]
 
 ## Actionable Checklist
-1. Create `src/robex/engine/history.py` implementing an `ActionRecord` dataclass (action_type, details, timestamp, duration_ms, status, error_msg) and a thread-safe `HistoryRecorder` maintaining a fixed-size ring buffer (maximum 1,000 entries) to prevent unbounded memory growth.
-2. Implement summary metrics (`get_summary() -> HistorySummary`) and structured JSON serialization (`export_to_json(filepath)`) in `HistoryRecorder` so users can inspect past execution logs and durations.
-3. Extend `MacroRunner` in `src/robex/engine/runner.py` with runtime budget controls (`max_duration_sec: Optional[float]` and `action_delay_sec: float = 0.0`) that automatically halt execution gracefully when the allotted time ceiling expires.
-4. Update `_worker_loop` in `src/robex/engine/runner.py` to benchmark each action's execution duration, append structured telemetry records to `history_recorder`, and enforce `max_duration_sec` checks before each atomic step.
-5. Author comprehensive unit tests in `tests/test_history.py` and expand `tests/test_runner.py` verifying accurate duration tracking, thread safety, JSON export, ring-buffer bounding, and max-duration enforcement.
+1. Replace `CTkEntry` in `src/robex/gui/main_window.py` with a multiline `CTkTextbox` capable of accepting long pasted paragraphs or speech-to-text dictation, integrating automatic text extraction and formatting before dispatching to `parser.parse_instruction()`.
+2. Implement a Target Application section with a dropdown menu dynamically populated using `window_manager.list_open_windows()`, a "Refresh" button, and a checkbox to toggle `runner.set_require_focus()` to prevent off-screen execution.
+3. Add a Runtime Settings panel containing `max_duration_sec` input controls (with a unit selector for seconds/minutes) and action pacing delay sliders/entries, connecting them to `runner.set_max_duration()` and `runner.set_action_delay()`.
+4. Implement an Execution History view/tab displaying historical action records from `history_recorder.get_records()`, aggregate stats from `history_recorder.get_summary()`, and an "Export History (JSON)" button.
+5. Add a real-time resource monitor badge in the header/status bar displaying current process RAM usage against the 4,096 MB hardware ceiling (and 0 MB VRAM indicator) updating periodically via `root.after()`.
+6. Create `tests/test_gui.py` with headless/unit tests verifying UI initialization, component binding, preset insertion into the multiline text box, history record rendering, and resource monitor formatting without requiring an active desktop display.
 
 ## Constraints
-- **Strict Resource Budget**: History storage must be capped at 1,000 items in memory; total RAM overhead must remain below 5 MB with 0 GB VRAM consumption to adhere strictly to the 4 GB ceilings.
-- **Documentation Integrity**: Preserve all existing comments, docstrings, and architectural structure in `src/robex/engine/runner.py`.
-- **Backward Compatibility**: When `max_duration_sec` is `None`, runner must behave identically to previous iterations; all 53 existing unit tests must continue to pass without error.
+- **Strict Resource Budget**: GUI memory footprint must not exceed 30 MB RAM and 0 MB VRAM, strictly honoring the 4 GB ceiling.
+- **Headless & Fallback Safety**: Must not crash in headless testing environments or when `customtkinter` is replaced by standard `tkinter`.
+- **Documentation Integrity**: Preserve all existing comments, docstrings, and architectural structure in `main_window.py`.
+- **Backward Compatibility**: Existing hotkeys (F8 Start, F9 Pause, F12 Killswitch), presets, and loop toggles must remain intact; all 68 existing unit tests must continue to pass without error.
 
 ## Verification Command
 ```powershell
-.\venv\Scripts\pytest tests/test_history.py tests/test_runner.py tests/ -v
+.\venv\Scripts\pytest tests/test_gui.py tests/ -v
 ```
