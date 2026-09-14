@@ -1,0 +1,22 @@
+{
+    "app_name": "Robex",
+    "version": "0.1.0",
+    "hotkeys": {
+        "start": "f8",
+        "pause": "f9",
+        "killswitch": "f12"
+    },
+    "automation": {
+        "human_jitter": true,
+        "default_click_delay_ms": 100,
+        "failsafe_corner": true
+    },
+    "vision": {
+        "confidence_threshold": 0.8,
+        "screen_poll_rate_ms": 100
+    },
+    "window": {
+        "target_process_name": "RobloxPlayerBeta.exe",
+        "target_window_title": "Roblox"
+    }
+}

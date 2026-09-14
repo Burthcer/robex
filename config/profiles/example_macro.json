@@ -1,0 +1,28 @@
+{
+    "profile_name": "Sample Auto-Farm & Jump",
+    "description": "Demonstration macro that moves forward, jumps, and clicks screen coordinates",
+    "repeat_count": 5,
+    "actions": [
+        {
+            "type": "key_hold",
+            "key": "w",
+            "duration": 2.0
+        },
+        {
+            "type": "key_press",
+            "key": "space",
+            "duration": 0.1
+        },
+        {
+            "type": "wait",
+            "duration": 0.5
+        },
+        {
+            "type": "click",
+            "x": 500,
+            "y": 400,
+            "button": "left",
+            "clicks": 1
+        }
+    ]
+}
