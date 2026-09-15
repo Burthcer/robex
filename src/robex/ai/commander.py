@@ -17,6 +17,25 @@ from robex.ai.normalizer import TextNormalizer
 
 logger = logging.getLogger(__name__)
 
+# Colors the fast HSV color-matching path (VisionClickAction.target_color) knows
+# about. A button descriptor outside this set can't be found that way, so it is
+# instead routed through AutoPicker as a semantic query (see _parse_single_clause).
+_KNOWN_COLORS = {"green", "red", "blue", "yellow", "orange"}
+
+# Matches an embedded pacing-delay phrase inside an otherwise free-form clause,
+# e.g. "click the auto sell button again with a delay of about 1 second" or
+# "click the shop icon every 2 seconds" -- so a single spoken/typed sentence can
+# still produce a [click, wait] action pair without requiring the user to phrase
+# it as two clauses joined by "then".
+_EMBEDDED_DELAY_RE = re.compile(
+    r"(?:with\s+(?:an?\s+)?(?:\w+\s+){0,3}?delay\s+of\s+(?:about\s+)?|every\s+)"
+    r"(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b",
+    re.IGNORECASE,
+)
+# Trailing connective words left dangling once the delay phrase above is removed,
+# e.g. "click the button again" -> "click the button".
+_TRAILING_CONNECTIVE_RE = re.compile(r"\s+(?:with|again)\s*$", re.IGNORECASE)
+
 
 class CommandParser:
     """Interprets user prompt commands (e.g. 'Click green button, then jump, then hold W for 2s')."""
@@ -42,9 +61,20 @@ class CommandParser:
 
         actions: List[Action] = []
         for clause in clauses:
+            # An embedded delay phrase yields a trailing WaitAction alongside
+            # whatever the (now-cleaned) rest of the clause parses to.
+            extra_wait: Optional[WaitAction] = None
+            delay_match = _EMBEDDED_DELAY_RE.search(clause)
+            if delay_match:
+                extra_wait = WaitAction(duration=float(delay_match.group(1)))
+                clause = clause[:delay_match.start()] + clause[delay_match.end():]
+                clause = _TRAILING_CONNECTIVE_RE.sub("", clause).strip()
+
             act = self._parse_single_clause(clause)
             if act:
                 actions.append(act)
+                if extra_wait:
+                    actions.append(extra_wait)
             else:
                 logger.warning("Could not interpret command clause: '%s'", clause)
 
@@ -54,11 +84,16 @@ class CommandParser:
         """Parses a single atomic clause into an Action."""
         s = clause.lower().strip()
 
-        # 1. Vision Click: e.g. "click green button", "click on the red button", "press the blue button"
-        match_vision = re.search(r"(?:click|tap|press)(?:\s+on)?(?:\s+the)?\s+([a-z]+)\s+button", s)
+        # 1. Vision Click: e.g. "click green button", "click on the red button", "press the blue button".
+        # The descriptor can be more than one word ("auto sell button", "shop icon
+        # button") -- a recognized color still takes the fast HSV path, anything
+        # else is routed through AutoPicker as a semantic query (color/position/OCR).
+        match_vision = re.search(r"(?:click|tap|press)(?:\s+on)?(?:\s+the)?\s+(.+?)\s+(?:button|icon)\b", s)
         if match_vision:
-            color = match_vision.group(1)
-            return VisionClickAction(target_color=color, timeout_sec=3.0)
+            descriptor = match_vision.group(1).strip()
+            if descriptor in _KNOWN_COLORS:
+                return VisionClickAction(target_color=descriptor, timeout_sec=3.0)
+            return VisionClickAction(query=descriptor, timeout_sec=3.0)
 
         # 2. Absolute Click: e.g. "click at 450, 300" or "click (450, 300)"
         match_coords = re.search(r"click(?:\s+at)?\s*\(?\s*(\d+)\s*,\s*(\d+)\s*\)?", s)

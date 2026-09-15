@@ -79,3 +79,34 @@ def test_parse_multiline_dictated_paragraph():
     assert actions[1].duration == 1.5
     assert isinstance(actions[2], KeyPressAction)
     assert actions[2].key == "space"
+
+
+def test_parse_non_color_button_description_routes_to_semantic_query():
+    parser = CommandParser()
+    actions = parser.parse_instruction("click the auto sell button")
+    assert len(actions) == 1
+    assert isinstance(actions[0], VisionClickAction)
+    assert actions[0].query == "auto sell"
+    assert actions[0].target_color == "green"  # unused when query is set
+
+
+def test_parse_free_form_sentence_with_embedded_delay_produces_click_and_wait():
+    parser = CommandParser()
+    text = "I want you to click the auto sell button again with an essentially delay of about 1 second."
+    actions = parser.parse_instruction(text)
+
+    assert len(actions) == 2
+    assert isinstance(actions[0], VisionClickAction)
+    assert actions[0].query == "auto sell"
+    assert isinstance(actions[1], WaitAction)
+    assert actions[1].duration == 1.0
+
+
+def test_parse_every_n_seconds_phrase_produces_wait():
+    parser = CommandParser()
+    actions = parser.parse_instruction("click the shop icon every 2 seconds")
+    assert len(actions) == 2
+    assert isinstance(actions[0], VisionClickAction)
+    assert actions[0].query == "shop"
+    assert isinstance(actions[1], WaitAction)
+    assert actions[1].duration == 2.0

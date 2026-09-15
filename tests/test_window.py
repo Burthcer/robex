@@ -37,6 +37,8 @@ def test_list_open_windows_returns_window_info():
             222: (10, 10, 210, 110),
         }[hwnd]
         mock_gui.IsWindowVisible.return_value = True
+        mock_gui.GetWindowLong.return_value = 0  # no WS_EX_TOOLWINDOW/APPWINDOW flags
+        mock_gui.GetWindow.return_value = 0  # no owner -> a real top-level window
 
         windows = manager.list_open_windows()
 
@@ -58,6 +60,8 @@ def test_list_open_windows_filters_empty_titles_by_default():
         mock_gui.GetWindowText.side_effect = lambda hwnd: {1: "", 2: "Roblox"}[hwnd]
         mock_gui.GetWindowRect.return_value = (0, 0, 100, 100)
         mock_gui.IsWindowVisible.return_value = True
+        mock_gui.GetWindowLong.return_value = 0
+        mock_gui.GetWindow.return_value = 0
 
         windows = manager.list_open_windows(filter_empty=True)
 
@@ -69,6 +73,59 @@ def test_list_open_windows_without_win32_returns_empty():
     manager = WindowManager()
     with patch("robex.core.window.HAS_WIN32", False):
         assert manager.list_open_windows() == []
+
+
+def test_list_open_windows_excludes_tool_windows_and_owned_popups():
+    """Regression test: EnumWindows returns hundreds of hidden helper/tray/tool
+    windows -- only real Alt-Tab-style app windows should reach the dropdown."""
+    manager = WindowManager()
+
+    # hwnd 1: a real app window. hwnd 2: a tool window (e.g. a tray helper).
+    # hwnd 3: a popup owned by another window, without WS_EX_APPWINDOW.
+    def fake_enum_windows(callback, extra):
+        for hwnd in (1, 2, 3):
+            callback(hwnd, None)
+
+    with patch("robex.core.window.win32gui") as mock_gui, \
+         patch("robex.core.window.win32con") as mock_con:
+        mock_con.GWL_EXSTYLE = -20
+        mock_con.WS_EX_TOOLWINDOW = 0x80
+        mock_con.WS_EX_APPWINDOW = 0x40000
+        mock_con.GW_OWNER = 4
+
+        mock_gui.EnumWindows.side_effect = fake_enum_windows
+        mock_gui.GetWindowText.side_effect = lambda hwnd: {1: "Roblox", 2: "Tray Helper", 3: "Popup"}[hwnd]
+        mock_gui.GetWindowRect.return_value = (0, 0, 100, 100)
+        mock_gui.IsWindowVisible.return_value = True
+        mock_gui.GetWindowLong.side_effect = lambda hwnd, flag: {
+            1: 0,
+            2: mock_con.WS_EX_TOOLWINDOW,
+            3: 0,
+        }[hwnd]
+        mock_gui.GetWindow.side_effect = lambda hwnd, flag: {1: 0, 2: 0, 3: 999}[hwnd]
+
+        windows = manager.list_open_windows()
+
+    assert [w.title for w in windows] == ["Roblox"]
+
+
+def test_list_open_windows_excludes_zero_size_windows():
+    manager = WindowManager()
+
+    def fake_enum_windows(callback, extra):
+        callback(1, None)
+
+    with patch("robex.core.window.win32gui") as mock_gui:
+        mock_gui.EnumWindows.side_effect = fake_enum_windows
+        mock_gui.GetWindowText.return_value = "Hidden Message Window"
+        mock_gui.GetWindowRect.return_value = (0, 0, 0, 0)  # zero width/height
+        mock_gui.IsWindowVisible.return_value = True
+        mock_gui.GetWindowLong.return_value = 0
+        mock_gui.GetWindow.return_value = 0
+
+        windows = manager.list_open_windows()
+
+    assert windows == []
 
 
 # --- Coordinate mapping (existing behavior, still covered) -----------------

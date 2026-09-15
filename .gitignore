@@ -35,6 +35,10 @@ venv.bak/
 *.manifest
 *.spec.bak
 
+# Local built app copy (the actual Robex.exe ships as a GitHub Release asset,
+# not committed here -- see README "Quick Start")
+final app/
+
 # Testing & Coverage
 .pytest_cache/
 .coverage

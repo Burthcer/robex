@@ -57,16 +57,50 @@ class WindowManager:
 
         return found_hwnd
 
+    def _is_real_app_window(self, hwnd) -> bool:
+        """Returns True for windows a user would recognize from Alt-Tab.
+
+        EnumWindows returns hundreds of hidden helper/message-only/tray-icon
+        windows created by background processes (tool windows, owned popups,
+        zero-size windows). Without this filter, list_open_windows() dumps
+        all of them into the target dropdown alongside the handful of windows
+        someone would actually want to automate.
+        """
+        if not win32gui.IsWindowVisible(hwnd):
+            return False
+        if not win32gui.GetWindowText(hwnd).strip():
+            return False
+
+        ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+        if ex_style & win32con.WS_EX_TOOLWINDOW:
+            return False
+
+        # Owned windows (dialogs/popups belonging to another window) are only
+        # kept if they explicitly opt in as a real app window.
+        if win32gui.GetWindow(hwnd, win32con.GW_OWNER) != 0 and not (ex_style & win32con.WS_EX_APPWINDOW):
+            return False
+
+        try:
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+        except Exception:
+            return False
+        if (right - left) <= 0 or (bottom - top) <= 0:
+            return False
+
+        return True
+
     def list_open_windows(self, filter_empty: bool = True) -> List[WindowInfo]:
-        """Enumerates every top-level window currently open on the desktop.
+        """Enumerates the real, user-facing top-level windows currently open on
+        the desktop (the same set you'd see cycling through Alt-Tab).
 
         This supports targeting any Roblox/Windows app dynamically instead of a
         single hardcoded title -- callers can inspect the returned titles/rects
         to pick a target window interactively.
 
         Args:
-            filter_empty: When True (default), skips windows with a blank title
-                (background/helper windows with no user-facing surface).
+            filter_empty: When True (default), skips blank-titled, tool, owned,
+                invisible, and zero-size windows -- i.e. everything that isn't a
+                real application window a user would recognize.
         """
         if not HAS_WIN32:
             logger.warning("pywin32 not available; cannot enumerate windows.")
@@ -75,6 +109,9 @@ class WindowManager:
         windows: List[WindowInfo] = []
 
         def enum_windows_callback(hwnd, extra):
+            if filter_empty and not self._is_real_app_window(hwnd):
+                return True
+
             title = win32gui.GetWindowText(hwnd)
             if filter_empty and not title.strip():
                 return True
