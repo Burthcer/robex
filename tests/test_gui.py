@@ -212,6 +212,10 @@ def fake_window(monkeypatch):
     monkeypatch.setattr(mw, "ctk", _build_fake_ctk_module())
     monkeypatch.setattr(mw, "HAS_CTK", True)
     monkeypatch.setattr(mw.window_manager, "list_open_windows", lambda *a, **kw: [])
+    # Restore the shared window_manager singleton's target_title after the
+    # test regardless of what _refresh_window_list()/_on_target_window_selected
+    # set it to, so tests can't leak state into each other.
+    monkeypatch.setattr(mw.window_manager, "target_title", mw.window_manager.target_title)
     fresh_history = HistoryRecorder()
     monkeypatch.setattr(mw, "history_recorder", fresh_history)
 
@@ -226,6 +230,7 @@ def fake_window_plain_tkinter(monkeypatch):
     monkeypatch.setattr(mw, "ctk", _build_fake_ctk_module())
     monkeypatch.setattr(mw, "HAS_CTK", False)
     monkeypatch.setattr(mw.window_manager, "list_open_windows", lambda *a, **kw: [])
+    monkeypatch.setattr(mw.window_manager, "target_title", mw.window_manager.target_title)
     monkeypatch.setattr(mw, "history_recorder", HistoryRecorder())
     return mw.MainWindow()
 
@@ -264,6 +269,36 @@ def test_control_buttons_bound_to_handlers(fake_window):
 
 def test_window_dropdown_falls_back_to_placeholder_when_no_windows(fake_window):
     assert fake_window.window_menu.get() == "No windows found"
+
+
+def test_refresh_window_list_syncs_target_title_to_first_entry(fake_window, monkeypatch):
+    """Regression test: selecting/refreshing the dropdown previously had zero
+    effect on what automation actually targeted -- window_manager.target_title
+    never changed, so the dropdown was purely cosmetic."""
+    fake_windows = [
+        types.SimpleNamespace(title="Roblox"),
+        types.SimpleNamespace(title="Notepad"),
+    ]
+    monkeypatch.setattr(mw.window_manager, "list_open_windows", lambda *a, **kw: fake_windows)
+
+    fake_window._refresh_window_list()
+
+    assert fake_window.window_menu.get() == "Roblox"
+    assert mw.window_manager.target_title == "Roblox"
+
+
+def test_selecting_target_window_updates_window_manager(fake_window):
+    fake_window._on_target_window_selected("Notepad")
+
+    assert fake_window.window_menu.get() == "Notepad"
+    assert mw.window_manager.target_title == "Notepad"
+
+
+def test_selecting_target_window_updates_window_manager_plain_tkinter(fake_window_plain_tkinter):
+    fake_window_plain_tkinter._on_target_window_selected("Notepad")
+
+    assert fake_window_plain_tkinter._window_var.get() == "Notepad"
+    assert mw.window_manager.target_title == "Notepad"
 
 
 # --------------------------------------------------------------------------

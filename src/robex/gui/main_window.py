@@ -330,7 +330,10 @@ class MainWindow:
             target_row = ctk.CTkFrame(target_frame, fg_color="transparent")
             target_row.pack(fill="x", padx=16, pady=(0, 12))
 
-            self.window_menu = ctk.CTkOptionMenu(target_row, values=["No windows found"], width=300)
+            self.window_menu = ctk.CTkOptionMenu(
+                target_row, values=["No windows found"], width=300,
+                command=self._on_target_window_selected
+            )
             self.window_menu.pack(side="left", padx=(0, 8))
 
             self.refresh_windows_btn = ctk.CTkButton(
@@ -588,7 +591,10 @@ class MainWindow:
     # ----------------- Target window helpers -----------------
 
     def _refresh_window_list(self):
-        """Repopulates the target-window dropdown from window_manager.list_open_windows()."""
+        """Repopulates the target-window dropdown from window_manager.list_open_windows()
+        and keeps window_manager.target_title in sync with whatever is shown as
+        selected -- otherwise the dropdown would display one window while
+        automation silently keeps targeting a different one."""
         titles = window_titles(window_manager.list_open_windows())
         if not titles:
             titles = ["No windows found"]
@@ -600,8 +606,22 @@ class MainWindow:
             menu = self.window_menu["menu"]
             menu.delete(0, "end")
             for title in titles:
-                menu.add_command(label=title, command=lambda t=title: self._window_var.set(t))
+                menu.add_command(label=title, command=lambda t=title: self._on_target_window_selected(t))
             self._window_var.set(titles[0])
+
+        window_manager.target_title = titles[0]
+
+    def _on_target_window_selected(self, title: str) -> None:
+        """Fired when the user picks a different entry from the target-window
+        dropdown. Without this, selecting a window in the UI had no effect --
+        automation kept targeting whatever WindowManager's default/previous
+        target_title was, regardless of what the dropdown showed as selected."""
+        if HAS_CTK:
+            self.window_menu.set(title)
+        else:
+            self._window_var.set(title)
+        window_manager.target_title = title
+        self.log_message(f"[INFO] Target window set to: {title}")
 
     def _on_refresh_windows_clicked(self):
         self._refresh_window_list()

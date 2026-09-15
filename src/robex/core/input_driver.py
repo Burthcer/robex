@@ -15,9 +15,17 @@ logger = logging.getLogger(__name__)
 # Try importing pydirectinput for DirectX / DirectInput game compatibility
 try:
     import pydirectinput
-    # Configure pydirectinput defaults
+    # Configure pydirectinput defaults. FAILSAFE is intentionally OFF here: its
+    # corner check runs against the cursor's *starting* position before every
+    # single move, so if the cursor is merely resting in a corner when a macro
+    # starts (extremely easy to happen), it permanently refuses to move the
+    # mouse at all -- there is no way to move it away without disabling the
+    # flag. Robex's own corner fail-safe (SafetyController._cursor_in_corner,
+    # checked via assert_safe()) replaces it with the same safety intent but
+    # without that deadlock, and integrates with the F12 killswitch/abort
+    # callbacks instead of raising a raw, uncoordinated exception.
     pydirectinput.PAUSE = 0.01
-    pydirectinput.FAILSAFE = True
+    pydirectinput.FAILSAFE = False
     HAS_DIRECTINPUT = True
 except ImportError:
     pydirectinput = None
@@ -27,7 +35,7 @@ except ImportError:
 try:
     import pyautogui
     pyautogui.PAUSE = 0.01
-    pyautogui.FAILSAFE = True
+    pyautogui.FAILSAFE = False  # see corner fail-safe note above
     HAS_PYAUTOGUI = True
 except ImportError:
     pyautogui = None
